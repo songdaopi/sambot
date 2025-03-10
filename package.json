@@ -1,0 +1,26 @@
+{
+  "name": "discord-ai-bot",
+  "version": "1.0.0",
+  "description": "A Discord bot that uses OpenAI to respond to messages.",
+  "main": "bot.js",
+  "scripts": {
+    "start": "node bot.js"
+  },
+  "keywords": [
+    "discord",
+    "bot",
+    "openai",
+    "ai"
+  ],
+  "author": "You",
+  "license": "MIT",
+  "dependencies": {
+    "@discordjs/rest": "^1.0.1",
+    "discord-api-types": "^0.37.66",
+    "discord.js": "^13.17.1",
+    "openai": "^4.0.0"
+  },
+  "engines": {
+    "node": ">=16.0.0"
+  }
+}
