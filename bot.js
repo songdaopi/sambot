@@ -309,7 +309,6 @@ client.on('interactionCreate', async interaction => {
         }
         
         // 准备消息内容
-        let apiMessages = [...conversations[userId]];
         let userContent;
         
         // 如果提供了图片URL，添加图片到消息中
@@ -319,15 +318,18 @@ client.on('interactionCreate', async interaction => {
             { type: "image_url", image_url: { url: imageUrl } }
           ];
           
-          // 将最后一条用户消息替换为包含图片的消息
-          apiMessages.push({
+          // 添加用户消息（包含图片）到对话历史
+          conversations[userId].push({
             role: "user",
             content: userContent
           });
         } else {
           // 否则只添加文本消息
-          apiMessages.push({ role: "user", content: userMessage });
+          conversations[userId].push({ role: "user", content: userMessage });
         }
+        
+        // 创建API消息数组的副本
+        const apiMessages = [...conversations[userId]];
         
         console.log("Sending to OpenAI:", JSON.stringify(apiMessages, null, 2));
         
@@ -341,18 +343,7 @@ client.on('interactionCreate', async interaction => {
         // 获取 AI 的回复
         const aiResponse = response.choices[0].message.content;
         
-        // 添加用户消息和AI回复到对话历史
-        if (imageUrl) {
-          // 为了在历史记录中保存用户消息（包括图片）
-          conversations[userId].push({
-            role: "user",
-            content: userContent
-          });
-        } else {
-          conversations[userId].push({ role: "user", content: userMessage });
-        }
-        
-        // 添加AI回复
+        // 添加AI回复到对话历史
         conversations[userId].push({ role: "assistant", content: aiResponse });
         
         // 如果对话历史太长，删除最早的消息（保留 system 消息）
