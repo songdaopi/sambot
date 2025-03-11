@@ -82,6 +82,12 @@ const commands = [
         description: 'The message to send to AI',
         required: true,
       },
+      {
+        name: 'pic',
+        type: 3, // STRING
+        description: 'URL of an image to analyze',
+        required: false,
+      }
     ],
   },
   {
@@ -176,8 +182,13 @@ function createHistoryEmbed(userId, page = 0) {
     
     // 截断过长的消息
     let content = message.content;
-    if (content.length > 1024) {
-      content = content.substring(0, 1021) + '...';
+    if (typeof content === 'string') {
+      if (content.length > 1024) {
+        content = content.substring(0, 1021) + '...';
+      }
+    } else if (Array.isArray(content)) {
+      // 处理包含图片的消息
+      content = "包含图片的消息";
     }
     
     embed.addField(`${role}:`, content);
@@ -285,6 +296,8 @@ client.on('interactionCreate', async interaction => {
     } else if (commandName === 'ai') {
       // 获取用户输入的消息
       const userMessage = interaction.options.getString('message');
+      // 获取用户提供的图片URL（如果有）
+      const imageUrl = interaction.options.getString('pic');
       
       // 先回复一个临时消息，因为 API 调用可能需要一些时间
       await interaction.deferReply();
@@ -295,20 +308,42 @@ client.on('interactionCreate', async interaction => {
           initializeConversation(userId);
         }
         
-        // 添加用户消息到对话历史
-        conversations[userId].push({ role: "user", content: userMessage });
+        // 准备消息内容
+        let userContent;
+        
+        // 如果提供了图片URL，添加图片到消息中
+        if (imageUrl) {
+          userContent = [
+            { type: "text", text: userMessage },
+            { type: "image_url", image_url: { url: imageUrl } }
+          ];
+          
+          // 添加用户消息（包含图片）到对话历史
+          conversations[userId].push({
+            role: "user",
+            content: userContent
+          });
+        } else {
+          // 否则只添加文本消息
+          conversations[userId].push({ role: "user", content: userMessage });
+        }
+        
+        // 创建API消息数组的副本
+        const apiMessages = [...conversations[userId]];
+        
+        console.log("Sending to OpenAI:", JSON.stringify(apiMessages, null, 2));
         
         // 调用 OpenAI API，传递完整的对话历史
         const response = await openai.chat.completions.create({
-          model: "gpt-3.5-turbo",
-          messages: conversations[userId],
+          model: "gpt-4-vision-preview", // 使用支持图像的模型
+          messages: apiMessages,
           max_tokens: 1000,
         });
         
         // 获取 AI 的回复
         const aiResponse = response.choices[0].message.content;
         
-        // 添加 AI 回复到对话历史
+        // 添加AI回复到对话历史
         conversations[userId].push({ role: "assistant", content: aiResponse });
         
         // 如果对话历史太长，删除最早的消息（保留 system 消息）
@@ -320,13 +355,20 @@ client.on('interactionCreate', async interaction => {
         }
         
         // 发送回复
+        let replyContent = `**AI 回复:** ${aiResponse}`;
+        
+        // 如果消息太长，Discord可能会拒绝发送
+        if (replyContent.length > 2000) {
+          replyContent = replyContent.substring(0, 1997) + "...";
+        }
+        
         await interaction.editReply({
-          content: `**AI 回复:** ${aiResponse}`,
+          content: replyContent,
         });
       } catch (error) {
         console.error('Error calling OpenAI API:', error);
         await interaction.editReply({
-          content: '抱歉，调用 AI 时出现了错误。请稍后再试。',
+          content: `抱歉，调用 AI 时出现了错误: ${error.message}`,
         });
       }
     } else if (commandName === 'clear') {
@@ -380,7 +422,10 @@ client.on('interactionCreate', async interaction => {
       const row = createPaginationButtons(currentPage, totalPages);
       
       // 存储分页数据
-      historyPagination[userId] = { currentPage };
+      historyPagination[userId] = { 
+        currentPage,
+        timestamp: Date.now() // 添加时间戳以便清理
+      };
       
       // 发送嵌入式消息和按钮
       await interaction.reply({
