@@ -62,7 +62,7 @@ function saveSystemPrompts() {
 const userSystemPrompts = loadSystemPrompts();
 
 // 最大对话历史长度（消息对数）
-const MAX_HISTORY_LENGTH = 10;
+const MAX_HISTORY_LENGTH = 80;
 
 // 定义斜杠命令
 const commands = [
