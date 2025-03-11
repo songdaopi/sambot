@@ -182,8 +182,13 @@ function createHistoryEmbed(userId, page = 0) {
     
     // 截断过长的消息
     let content = message.content;
-    if (content.length > 1024) {
-      content = content.substring(0, 1021) + '...';
+    if (typeof content === 'string') {
+      if (content.length > 1024) {
+        content = content.substring(0, 1021) + '...';
+      }
+    } else if (Array.isArray(content)) {
+      // 处理包含图片的消息
+      content = "包含图片的消息";
     }
     
     embed.addField(`${role}:`, content);
@@ -304,26 +309,32 @@ client.on('interactionCreate', async interaction => {
         }
         
         // 准备消息内容
-        let messages = [...conversations[userId]];
+        let apiMessages = [...conversations[userId]];
+        let userContent;
         
         // 如果提供了图片URL，添加图片到消息中
         if (imageUrl) {
-          messages.push({
+          userContent = [
+            { type: "text", text: userMessage },
+            { type: "image_url", image_url: { url: imageUrl } }
+          ];
+          
+          // 将最后一条用户消息替换为包含图片的消息
+          apiMessages.push({
             role: "user",
-            content: [
-              { type: "text", text: userMessage },
-              { type: "image_url", image_url: { url: imageUrl } }
-            ]
+            content: userContent
           });
         } else {
           // 否则只添加文本消息
-          messages.push({ role: "user", content: userMessage });
+          apiMessages.push({ role: "user", content: userMessage });
         }
+        
+        console.log("Sending to OpenAI:", JSON.stringify(apiMessages, null, 2));
         
         // 调用 OpenAI API，传递完整的对话历史
         const response = await openai.chat.completions.create({
           model: "gpt-4-vision-preview", // 使用支持图像的模型
-          messages: messages,
+          messages: apiMessages,
           max_tokens: 1000,
         });
         
@@ -332,14 +343,16 @@ client.on('interactionCreate', async interaction => {
         
         // 添加用户消息和AI回复到对话历史
         if (imageUrl) {
-          // 为了保存在历史记录中，我们将图片URL作为文本添加
-          conversations[userId].push({ 
-            role: "user", 
-            content: `${userMessage}\n[图片: ${imageUrl}]` 
+          // 为了在历史记录中保存用户消息（包括图片）
+          conversations[userId].push({
+            role: "user",
+            content: userContent
           });
         } else {
           conversations[userId].push({ role: "user", content: userMessage });
         }
+        
+        // 添加AI回复
         conversations[userId].push({ role: "assistant", content: aiResponse });
         
         // 如果对话历史太长，删除最早的消息（保留 system 消息）
@@ -351,13 +364,20 @@ client.on('interactionCreate', async interaction => {
         }
         
         // 发送回复
+        let replyContent = `**AI 回复:** ${aiResponse}`;
+        
+        // 如果消息太长，Discord可能会拒绝发送
+        if (replyContent.length > 2000) {
+          replyContent = replyContent.substring(0, 1997) + "...";
+        }
+        
         await interaction.editReply({
-          content: `**AI 回复:** ${aiResponse}`,
+          content: replyContent,
         });
       } catch (error) {
         console.error('Error calling OpenAI API:', error);
         await interaction.editReply({
-          content: '抱歉，调用 AI 时出现了错误。请稍后再试。',
+          content: `抱歉，调用 AI 时出现了错误: ${error.message}`,
         });
       }
     } else if (commandName === 'clear') {
@@ -411,7 +431,10 @@ client.on('interactionCreate', async interaction => {
       const row = createPaginationButtons(currentPage, totalPages);
       
       // 存储分页数据
-      historyPagination[userId] = { currentPage };
+      historyPagination[userId] = { 
+        currentPage,
+        timestamp: Date.now() // 添加时间戳以便清理
+      };
       
       // 发送嵌入式消息和按钮
       await interaction.reply({
