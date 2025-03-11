@@ -82,6 +82,12 @@ const commands = [
         description: 'The message to send to AI',
         required: true,
       },
+      {
+        name: 'pic',
+        type: 3, // STRING
+        description: 'URL of an image to analyze',
+        required: false,
+      }
     ],
   },
   {
@@ -285,6 +291,8 @@ client.on('interactionCreate', async interaction => {
     } else if (commandName === 'ai') {
       // 获取用户输入的消息
       const userMessage = interaction.options.getString('message');
+      // 获取用户提供的图片URL（如果有）
+      const imageUrl = interaction.options.getString('pic');
       
       // 先回复一个临时消息，因为 API 调用可能需要一些时间
       await interaction.deferReply();
@@ -295,20 +303,43 @@ client.on('interactionCreate', async interaction => {
           initializeConversation(userId);
         }
         
-        // 添加用户消息到对话历史
-        conversations[userId].push({ role: "user", content: userMessage });
+        // 准备消息内容
+        let messages = [...conversations[userId]];
+        
+        // 如果提供了图片URL，添加图片到消息中
+        if (imageUrl) {
+          messages.push({
+            role: "user",
+            content: [
+              { type: "text", text: userMessage },
+              { type: "image_url", image_url: { url: imageUrl } }
+            ]
+          });
+        } else {
+          // 否则只添加文本消息
+          messages.push({ role: "user", content: userMessage });
+        }
         
         // 调用 OpenAI API，传递完整的对话历史
         const response = await openai.chat.completions.create({
-          model: "gpt-3.5-turbo",
-          messages: conversations[userId],
+          model: "gpt-4-vision-preview", // 使用支持图像的模型
+          messages: messages,
           max_tokens: 1000,
         });
         
         // 获取 AI 的回复
         const aiResponse = response.choices[0].message.content;
         
-        // 添加 AI 回复到对话历史
+        // 添加用户消息和AI回复到对话历史
+        if (imageUrl) {
+          // 为了保存在历史记录中，我们将图片URL作为文本添加
+          conversations[userId].push({ 
+            role: "user", 
+            content: `${userMessage}\n[图片: ${imageUrl}]` 
+          });
+        } else {
+          conversations[userId].push({ role: "user", content: userMessage });
+        }
         conversations[userId].push({ role: "assistant", content: aiResponse });
         
         // 如果对话历史太长，删除最早的消息（保留 system 消息）
