@@ -247,8 +247,26 @@ client.once('ready', () => {
 client.on('interactionCreate', async interaction => {
   if (!interaction.isCommand() && !interaction.isButton()) return;
 
+  // 检查是否是私信，如果是则拒绝
+  if (interaction.channel.type === 'DM') {
+    if (interaction.isCommand()) {
+      await interaction.reply({
+      content: '❌ 本机器人不支持在私信中使用指令，请在服务器中使用。',
+      ephemeral: true
+      });
+    }
+    if (interaction.isButton()) {
+      await interaction.reply({
+        content: '❌ 本机器人不支持在私信中使用按钮，请在服务器中使用。',
+        ephemeral: true
+      });
+    }
+    return;
+  }
+
   const userId = interaction.user.id;
   
+  // 以下是原有的代码
   // 处理按钮交互
   if (interaction.isButton()) {
     // 检查是否是分页按钮
