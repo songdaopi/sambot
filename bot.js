@@ -24,7 +24,9 @@ const openai = new OpenAI({
 });
 
 // 存储用户对话历史的对象
-const conversations = {};
+const conversations = {
+  global: [] // 添加一个全局对话历史，所有用户共享
+};
 
 // 默认的系统提示
 const DEFAULT_SYSTEM_PROMPT = "You are a helpful assistant.";
@@ -92,7 +94,7 @@ const commands = [
   },
   {
     name: 'clear',
-    description: 'Clear your conversation history with the AI',
+    description: 'Clear the global conversation history with the AI',
   },
   {
     name: 'system',
@@ -112,7 +114,7 @@ const commands = [
   },
   {
     name: 'listhis',
-    description: 'View your current conversation history with the AI',
+    description: 'View the current global conversation history with the AI',
   }
 ];
 
@@ -134,27 +136,25 @@ function setUserSystemPrompt(userId, prompt) {
   // 保存到文件
   saveSystemPrompts();
   
-  // 如果用户已有对话，更新系统提示
-  if (conversations[userId] && conversations[userId].length > 0) {
-    if (conversations[userId][0].role === "system") {
-      conversations[userId][0].content = prompt;
-    } else {
-      conversations[userId].unshift({ role: "system", content: prompt });
-    }
+  // 如果全局对话中已有系统提示，更新它
+  if (conversations.global && conversations.global.length > 0 && conversations.global[0].role === "system") {
+    conversations.global[0].content = prompt;
   }
 }
 
 // 初始化或重置用户的对话
 function initializeConversation(userId) {
   const systemPrompt = getUserSystemPrompt(userId);
-  conversations[userId] = [
+  // 使用全局对话历史，而不是用户特定的对话历史
+  conversations.global = [
     { role: "system", content: systemPrompt }
   ];
 }
 
 // 创建对话历史嵌入式消息
 function createHistoryEmbed(userId, page = 0) {
-  const history = conversations[userId] || [];
+  // 使用全局对话历史，而不是用户特定的对话历史
+  const history = conversations.global || [];
   
   // 跳过系统提示消息
   const userMessages = history.slice(1);
@@ -171,14 +171,14 @@ function createHistoryEmbed(userId, page = 0) {
   // 创建嵌入式消息
   const embed = new MessageEmbed()
     .setColor('#0099ff')
-    .setTitle('对话历史')
+    .setTitle('全局对话历史')
     .setDescription(`显示第 ${startIndex + 1} 到 ${endIndex} 条消息，共 ${userMessages.length} 条`)
     .setFooter({ text: `第 ${page + 1} 页，共 ${totalPages} 页` });
   
   // 添加消息到嵌入式消息
   for (let i = 0; i < pageMessages.length; i++) {
     const message = pageMessages[i];
-    const role = message.role === 'user' ? '你' : 'AI';
+    const role = message.role === 'user' ? '用户' : 'AI';
     
     // 截断过长的消息
     let content = message.content;
@@ -247,25 +247,14 @@ client.once('ready', () => {
 client.on('interactionCreate', async interaction => {
   if (!interaction.isCommand() && !interaction.isButton()) return;
 
-  // 检查是否是私信 - 使用 interaction.guild 判断
-  if (!interaction.guild) {
-    if (interaction.isCommand()) {
-      await interaction.reply({
-        content: '❌ 本机器人不支持在私信中使用指令，请在服务器中使用。',
-        ephemeral: true
-      });
-    }
-    return;
-  }
-
   const userId = interaction.user.id;
+  const username = interaction.user.username; // 获取用户名
   
-  // 以下是原有的代码
   // 处理按钮交互
   if (interaction.isButton()) {
     // 检查是否是分页按钮
     if (interaction.customId === 'prev_page' || interaction.customId === 'next_page') {
-      // 检查用户是否有分页数据
+      // 检查是否有分页数据
       if (!historyPagination[userId]) {
         await interaction.reply({ 
           content: '会话已过期，请重新使用 /listhis 命令查看历史记录。', 
@@ -315,8 +304,8 @@ client.on('interactionCreate', async interaction => {
       await interaction.deferReply();
       
       try {
-        // 初始化用户的对话历史（如果不存在）
-        if (!conversations[userId]) {
+        // 初始化全局对话历史（如果不存在）
+        if (!conversations.global || conversations.global.length === 0) {
           initializeConversation(userId);
         }
         
@@ -326,22 +315,22 @@ client.on('interactionCreate', async interaction => {
         // 如果提供了图片URL，添加图片到消息中
         if (imageUrl) {
           userContent = [
-            { type: "text", text: userMessage },
+            { type: "text", text: `${username}: ${userMessage}` }, // 添加用户名前缀
             { type: "image_url", image_url: { url: imageUrl } }
           ];
           
-          // 添加用户消息（包含图片）到对话历史
-          conversations[userId].push({
+          // 添加用户消息（包含图片）到全局对话历史
+          conversations.global.push({
             role: "user",
             content: userContent
           });
         } else {
-          // 否则只添加文本消息
-          conversations[userId].push({ role: "user", content: userMessage });
+          // 否则只添加文本消息，带用户名前缀
+          conversations.global.push({ role: "user", content: `${username}: ${userMessage}` });
         }
         
         // 创建API消息数组的副本
-        const apiMessages = [...conversations[userId]];
+        const apiMessages = [...conversations.global];
         
         console.log("Sending to OpenAI:", JSON.stringify(apiMessages, null, 2));
         
@@ -355,14 +344,14 @@ client.on('interactionCreate', async interaction => {
         // 获取 AI 的回复
         const aiResponse = response.choices[0].message.content;
         
-        // 添加AI回复到对话历史
-        conversations[userId].push({ role: "assistant", content: aiResponse });
+        // 添加AI回复到全局对话历史
+        conversations.global.push({ role: "assistant", content: aiResponse });
         
         // 如果对话历史太长，删除最早的消息（保留 system 消息）
-        if (conversations[userId].length > MAX_HISTORY_LENGTH + 1) {
-          conversations[userId] = [
-            conversations[userId][0],
-            ...conversations[userId].slice(-(MAX_HISTORY_LENGTH))
+        if (conversations.global.length > MAX_HISTORY_LENGTH + 1) {
+          conversations.global = [
+            conversations.global[0],
+            ...conversations.global.slice(-(MAX_HISTORY_LENGTH))
           ];
         }
         
@@ -384,11 +373,11 @@ client.on('interactionCreate', async interaction => {
         });
       }
     } else if (commandName === 'clear') {
-      // 清除用户的对话历史，但保持系统提示
+      // 清除全局对话历史，但保持系统提示
       initializeConversation(userId);
       
       await interaction.reply({
-        content: '你的对话历史已清除。系统提示保持不变。',
+        content: '全局对话历史已清除。系统提示保持不变。',
         ephemeral: true
       });
     } else if (commandName === 'system') {
@@ -397,6 +386,15 @@ client.on('interactionCreate', async interaction => {
       if (newPrompt) {
         // 设置新的系统提示
         setUserSystemPrompt(userId, newPrompt);
+        
+        // 更新全局对话中的系统提示
+        if (conversations.global && conversations.global.length > 0) {
+          if (conversations.global[0].role === "system") {
+            conversations.global[0].content = newPrompt;
+          } else {
+            conversations.global.unshift({ role: "system", content: newPrompt });
+          }
+        }
         
         await interaction.reply({
           content: `系统提示已更新为: "${newPrompt}"`,
@@ -415,15 +413,24 @@ client.on('interactionCreate', async interaction => {
       // 重置系统提示为默认值
       setUserSystemPrompt(userId, DEFAULT_SYSTEM_PROMPT);
       
+      // 更新全局对话中的系统提示
+      if (conversations.global && conversations.global.length > 0) {
+        if (conversations.global[0].role === "system") {
+          conversations.global[0].content = DEFAULT_SYSTEM_PROMPT;
+        } else {
+          conversations.global.unshift({ role: "system", content: DEFAULT_SYSTEM_PROMPT });
+        }
+      }
+      
       await interaction.reply({
         content: `系统提示已重置为默认值: "${DEFAULT_SYSTEM_PROMPT}"`,
         ephemeral: true
       });
     } else if (commandName === 'listhis') {
-      // 检查用户是否有对话历史
-      if (!conversations[userId] || conversations[userId].length <= 1) {
+      // 检查是否有全局对话历史
+      if (!conversations.global || conversations.global.length <= 1) {
         await interaction.reply({
-          content: '你还没有任何对话历史。',
+          content: '还没有任何对话历史。',
           ephemeral: true
         });
         return;
